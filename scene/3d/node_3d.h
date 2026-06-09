@@ -173,6 +173,12 @@ private:
 
 	NodePath visibility_parent_path;
 
+	// Screen-reader (TalkBack/AccessKit) opt-in. An empty name keeps the node a silent
+	// container; a non-empty name on a VisualInstance3D exposes it as a focusable element.
+	String accessibility_name;
+	String accessibility_description;
+	bool accessibility_clickable = false;
+
 	_FORCE_INLINE_ uint32_t _read_dirty_mask() const { return is_group_processing() ? data.dirty.mt.get() : data.dirty.st; }
 	_FORCE_INLINE_ bool _test_dirty_bits(uint32_t p_bits) const { return (is_group_processing() ? data.dirty.mt.get() : data.dirty.st) & p_bits; }
 	void _replace_dirty_mask(uint32_t p_mask) const;
@@ -221,6 +227,10 @@ protected:
 	// and this should take place both on ticks, and during resets.
 	virtual void fti_pump_xform();
 	virtual void fti_pump_property() {}
+
+	void _accessibility_action_click(const Variant &p_data);
+	void _accessibility_action_focus(const Variant &p_data);
+	void _accessibility_action_blur(const Variant &p_data);
 
 	void _notification(int p_what);
 	static void _bind_methods();
@@ -352,6 +362,13 @@ public:
 
 	void set_visibility_parent(const NodePath &p_path);
 	NodePath get_visibility_parent() const;
+
+	void set_accessibility_name(const String &p_name);
+	String get_accessibility_name() const;
+	void set_accessibility_description(const String &p_description);
+	String get_accessibility_description() const;
+	void set_accessibility_clickable(bool p_clickable);
+	bool is_accessibility_clickable() const;
 
 	Node3D();
 	~Node3D();
