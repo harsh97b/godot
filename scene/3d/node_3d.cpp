@@ -34,6 +34,7 @@
 #include "core/math/transform_interpolator.h"
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
+#include "scene/3d/camera_3d.h"
 #include "scene/3d/visual_instance_3d.h"
 #include "scene/main/scene_tree.h"
 #include "scene/main/viewport.h"
@@ -145,7 +146,89 @@ void Node3D::_notification(int p_what) {
 			RID ae = get_accessibility_element();
 			ERR_FAIL_COND(ae.is_null());
 
-			AccessibilityServer::get_singleton()->update_set_role(ae, AccessibilityServerEnums::AccessibilityRole::ROLE_CONTAINER);
+			AccessibilityServer *as = AccessibilityServer::get_singleton();
+			VisualInstance3D *vi = Object::cast_to<VisualInstance3D>(this);
+
+			// Always report current visibility, mirroring CanvasItem (canvas_item.cpp:312): a
+			// hidden 3D group/leaf is pruned from the screen-reader tree and a re-shown one returns.
+			const bool a11y_visible = is_visible_in_tree();
+			as->update_set_flag(ae, AccessibilityServerEnums::AccessibilityFlags::FLAG_HIDDEN, !a11y_visible);
+
+			// Opt-in: a non-empty `accessibility_name` on a visible VisualInstance3D becomes a
+			// focusable screen-reader element. Everything else is a silent structural container
+			// (its children are still linked by the base Node handler) that announces nothing.
+			if (!a11y_visible || accessibility_name.is_empty() || vi == nullptr) {
+				as->update_set_role(ae, AccessibilityServerEnums::AccessibilityRole::ROLE_CONTAINER);
+				// Clear any stale label: the name is the only field the driver's _ensure_node
+				// re-applies to a rebuilt node, so a demoted/hidden node would otherwise keep
+				// announcing its old name.
+				as->update_set_name(ae, String());
+				break;
+			}
+
+			as->update_set_role(ae, accessibility_clickable ? AccessibilityServerEnums::AccessibilityRole::ROLE_BUTTON : AccessibilityServerEnums::AccessibilityRole::ROLE_IMAGE);
+			as->update_set_name(ae, accessibility_name);
+			if (!accessibility_description.is_empty()) {
+				as->update_set_description(ae, accessibility_description);
+			}
+
+			// Bounds: project the visual's local AABB into the viewport and report it the
+			// same way Control does -- an identity element transform plus a bounds rect in
+			// the viewport's logical coordinate space. `Camera3D::unproject_position()`
+			// already returns logical (visible-rect) coordinates, the same space Control's
+			// composed bounds land in, so the root Window's content-scale transform is
+			// applied exactly once (no double-transform).
+			// See docs/android-accessibility/10-architecture-3d-a11y.md.
+			Viewport *vp = get_viewport();
+			Camera3D *cam = vp ? vp->get_camera_3d() : nullptr;
+			if (cam) {
+				const Transform3D gt = get_global_transform();
+				const AABB aabb = vi->get_aabb();
+				Vector2 r_min;
+				Vector2 r_max;
+				int visible_corners = 0;
+				for (int i = 0; i < 8; i++) {
+					const Vector3 world = gt.xform(aabb.get_endpoint(i));
+					if (cam->is_position_behind(world)) {
+						continue;
+					}
+					const Vector2 sp = cam->unproject_position(world);
+					if (visible_corners == 0) {
+						r_min = sp;
+						r_max = sp;
+					} else {
+						r_min.x = MIN(r_min.x, sp.x);
+						r_min.y = MIN(r_min.y, sp.y);
+						r_max.x = MAX(r_max.x, sp.x);
+						r_max.y = MAX(r_max.y, sp.y);
+					}
+					visible_corners++;
+				}
+				// Need at least two on-screen corners for a meaningful rectangle.
+				if (visible_corners >= 2) {
+					Rect2 rect(r_min, r_max - r_min);
+					// Guarantee a minimum focusable footprint (~48dp touch target).
+					const real_t min_size = 48.0;
+					if (rect.size.x < min_size) {
+						rect.position.x -= (min_size - rect.size.x) * 0.5;
+						rect.size.x = min_size;
+					}
+					if (rect.size.y < min_size) {
+						rect.position.y -= (min_size - rect.size.y) * 0.5;
+						rect.size.y = min_size;
+					}
+					as->update_set_transform(ae, Transform2D());
+					as->update_set_bounds(ae, rect);
+				}
+			}
+
+			// A registered ACTION_FOCUS is what makes the node a TalkBack swipe stop (there
+			// is no FLAG_FOCUSABLE). Mirrors Control's focusable gating.
+			as->update_add_action(ae, AccessibilityServerEnums::AccessibilityAction::ACTION_FOCUS, callable_mp(this, &Node3D::_accessibility_action_focus));
+			as->update_add_action(ae, AccessibilityServerEnums::AccessibilityAction::ACTION_BLUR, callable_mp(this, &Node3D::_accessibility_action_blur));
+			if (accessibility_clickable) {
+				as->update_add_action(ae, AccessibilityServerEnums::AccessibilityAction::ACTION_CLICK, callable_mp(this, &Node3D::_accessibility_action_click));
+			}
 		} break;
 
 		case NOTIFICATION_ENTER_TREE: {
@@ -1091,6 +1174,11 @@ void Node3D::_propagate_visibility_changed() {
 	notification(NOTIFICATION_VISIBILITY_CHANGED);
 	emit_signal(SceneStringName(visibility_changed));
 
+	// Re-run this node's accessibility handler so its visibility (FLAG_HIDDEN) is refreshed.
+	// Unlike CanvasItem, Node3D visibility does not otherwise re-queue an accessibility
+	// update, which would leave a hidden 3D group stale in the screen-reader tree.
+	queue_accessibility_update();
+
 #ifdef TOOLS_ENABLED
 	if (!data.gizmos.is_empty()) {
 		data.gizmos_dirty = true;
@@ -1429,6 +1517,54 @@ bool Node3D::_property_get_revert(const StringName &p_name, Variant &r_property)
 	return true;
 }
 
+void Node3D::set_accessibility_name(const String &p_name) {
+	if (accessibility_name == p_name) {
+		return;
+	}
+	accessibility_name = p_name;
+	queue_accessibility_update();
+}
+
+String Node3D::get_accessibility_name() const {
+	return accessibility_name;
+}
+
+void Node3D::set_accessibility_description(const String &p_description) {
+	if (accessibility_description == p_description) {
+		return;
+	}
+	accessibility_description = p_description;
+	queue_accessibility_update();
+}
+
+String Node3D::get_accessibility_description() const {
+	return accessibility_description;
+}
+
+void Node3D::set_accessibility_clickable(bool p_clickable) {
+	if (accessibility_clickable == p_clickable) {
+		return;
+	}
+	accessibility_clickable = p_clickable;
+	queue_accessibility_update();
+}
+
+bool Node3D::is_accessibility_clickable() const {
+	return accessibility_clickable;
+}
+
+void Node3D::_accessibility_action_click(const Variant &p_data) {
+	emit_signal(SNAME("accessibility_action_click"));
+}
+
+void Node3D::_accessibility_action_focus(const Variant &p_data) {
+	emit_signal(SNAME("accessibility_focus_entered"));
+}
+
+void Node3D::_accessibility_action_blur(const Variant &p_data) {
+	emit_signal(SNAME("accessibility_focus_exited"));
+}
+
 void Node3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_transform", "local"), &Node3D::set_transform);
 	ClassDB::bind_method(D_METHOD("get_transform"), &Node3D::get_transform);
@@ -1473,6 +1609,13 @@ void Node3D::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_visibility_parent", "path"), &Node3D::set_visibility_parent);
 	ClassDB::bind_method(D_METHOD("get_visibility_parent"), &Node3D::get_visibility_parent);
+
+	ClassDB::bind_method(D_METHOD("set_accessibility_name", "name"), &Node3D::set_accessibility_name);
+	ClassDB::bind_method(D_METHOD("get_accessibility_name"), &Node3D::get_accessibility_name);
+	ClassDB::bind_method(D_METHOD("set_accessibility_description", "description"), &Node3D::set_accessibility_description);
+	ClassDB::bind_method(D_METHOD("get_accessibility_description"), &Node3D::get_accessibility_description);
+	ClassDB::bind_method(D_METHOD("set_accessibility_clickable", "clickable"), &Node3D::set_accessibility_clickable);
+	ClassDB::bind_method(D_METHOD("is_accessibility_clickable"), &Node3D::is_accessibility_clickable);
 
 	ClassDB::bind_method(D_METHOD("update_gizmos"), &Node3D::update_gizmos);
 	ClassDB::bind_method(D_METHOD("add_gizmo", "gizmo"), &Node3D::add_gizmo);
@@ -1544,7 +1687,15 @@ void Node3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "visible"), "set_visible", "is_visible");
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "visibility_parent", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "GeometryInstance3D"), "set_visibility_parent", "get_visibility_parent");
 
+	ADD_GROUP("Accessibility", "accessibility_");
+	ADD_PROPERTY(PropertyInfo(Variant::STRING, "accessibility_name"), "set_accessibility_name", "get_accessibility_name");
+	ADD_PROPERTY(PropertyInfo(Variant::STRING, "accessibility_description"), "set_accessibility_description", "get_accessibility_description");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "accessibility_clickable"), "set_accessibility_clickable", "is_accessibility_clickable");
+
 	ADD_SIGNAL(MethodInfo("visibility_changed"));
+	ADD_SIGNAL(MethodInfo("accessibility_action_click"));
+	ADD_SIGNAL(MethodInfo("accessibility_focus_entered"));
+	ADD_SIGNAL(MethodInfo("accessibility_focus_exited"));
 }
 
 Node3D::Node3D() :
