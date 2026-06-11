@@ -4396,9 +4396,23 @@ void Control::_accessibility_action_hide_tooltip(const Variant &p_data) {
 }
 
 void Control::_accessibility_action_scroll_into_view(const Variant &p_data) {
-	ScrollContainer *sc = Object::cast_to<ScrollContainer>(get_parent());
-	if (sc) {
-		sc->ensure_control_visible(this);
+	// The control may be nested in containers inside the scroll container (e.g.
+	// ScrollContainer -> HBoxContainer -> this), so walk up to every scroll
+	// container ancestor, stopping at the viewport GUI root.
+	Node *base = get_parent();
+	while (base) {
+		ScrollContainer *sc = Object::cast_to<ScrollContainer>(base);
+		if (sc) {
+			sc->ensure_control_visible(this);
+		}
+		if (Object::cast_to<Viewport>(base)) {
+			break;
+		}
+		Control *c = Object::cast_to<Control>(base);
+		if (c && c->data.RI) {
+			break;
+		}
+		base = base->get_parent();
 	}
 }
 
