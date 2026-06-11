@@ -149,94 +149,81 @@ void Node3D::_notification(int p_what) {
 			AccessibilityServer *as = AccessibilityServer::get_singleton();
 			VisualInstance3D *vi = Object::cast_to<VisualInstance3D>(this);
 
-			// A named VisualInstance3D becomes a focusable screen-reader element ONLY when it
-			// is visible in the tree AND projects to a valid on-screen rectangle. Project the
-			// bounds FIRST so an off-screen / behind-camera node (or one with no active camera)
-			// can be demoted to a silent hidden container below, instead of becoming a
-			// zero-bounds focus stop -- such stops have no on-screen position and break
-			// TalkBack's left/right swipe order.
+			// Always report current visibility, mirroring CanvasItem (canvas_item.cpp:312): a
+			// hidden 3D group/leaf is pruned from the screen-reader tree and a re-shown one returns.
 			const bool a11y_visible = is_visible_in_tree();
-			const bool named_visual = (vi != nullptr) && !accessibility_name.is_empty();
+			as->update_set_flag(ae, AccessibilityServerEnums::AccessibilityFlags::FLAG_HIDDEN, !a11y_visible);
 
-			bool on_screen = false;
-			Rect2 rect;
-			if (a11y_visible && named_visual) {
-				Viewport *vp = get_viewport();
-				Camera3D *cam = vp ? vp->get_camera_3d() : nullptr;
-				if (cam) {
-					// Report bounds the way Control does -- identity element transform + a rect
-					// in the viewport's logical coordinate space. `unproject_position()` already
-					// returns logical (visible-rect) coordinates, so the root Window's
-					// content-scale transform is applied exactly once (no double-transform).
-					// See docs/android-accessibility/10-architecture-3d-a11y.md.
-					const Transform3D gt = get_global_transform();
-					const AABB aabb = vi->get_aabb();
-					Vector2 r_min;
-					Vector2 r_max;
-					int visible_corners = 0;
-					for (int i = 0; i < 8; i++) {
-						const Vector3 world = gt.xform(aabb.get_endpoint(i));
-						if (cam->is_position_behind(world)) {
-							continue;
-						}
-						const Vector2 sp = cam->unproject_position(world);
-						if (visible_corners == 0) {
-							r_min = sp;
-							r_max = sp;
-						} else {
-							r_min.x = MIN(r_min.x, sp.x);
-							r_min.y = MIN(r_min.y, sp.y);
-							r_max.x = MAX(r_max.x, sp.x);
-							r_max.y = MAX(r_max.y, sp.y);
-						}
-						visible_corners++;
-					}
-					// Need at least two on-screen corners for a meaningful rectangle.
-					if (visible_corners >= 2) {
-						rect = Rect2(r_min, r_max - r_min);
-						// Guarantee a minimum focusable footprint (~48dp touch target).
-						const real_t min_size = 48.0;
-						if (rect.size.x < min_size) {
-							rect.position.x -= (min_size - rect.size.x) * 0.5;
-							rect.size.x = min_size;
-						}
-						if (rect.size.y < min_size) {
-							rect.position.y -= (min_size - rect.size.y) * 0.5;
-							rect.size.y = min_size;
-						}
-						on_screen = true;
-					}
-				}
-			}
-
-			// Silent: unnamed / non-visual / hidden / off-screen nodes structure the a11y tree
-			// (their children are linked by the base Node handler) but announce nothing and are
-			// not swipe stops. A named visual node only reaches here when it is hidden or
-			// off-screen, so it is always hidden; a structural node is hidden only when it is
-			// genuinely not visible in the tree (hiding a visible container would prune the
-			// children it carries).
-			if (!on_screen) {
+			// Opt-in: a non-empty `accessibility_name` on a visible VisualInstance3D becomes a
+			// focusable screen-reader element. Everything else is a silent structural container
+			// (its children are still linked by the base Node handler) that announces nothing.
+			if (!a11y_visible || accessibility_name.is_empty() || vi == nullptr) {
 				as->update_set_role(ae, AccessibilityServerEnums::AccessibilityRole::ROLE_CONTAINER);
 				// Clear any stale label: the name is the only field the driver's _ensure_node
 				// re-applies to a rebuilt node, so a demoted/hidden node would otherwise keep
 				// announcing its old name.
 				as->update_set_name(ae, String());
-				as->update_set_flag(ae, AccessibilityServerEnums::AccessibilityFlags::FLAG_HIDDEN, named_visual ? true : !a11y_visible);
 				break;
 			}
 
-			// On-screen named visual node = a real focus stop.
-			as->update_set_flag(ae, AccessibilityServerEnums::AccessibilityFlags::FLAG_HIDDEN, false);
 			as->update_set_role(ae, accessibility_clickable ? AccessibilityServerEnums::AccessibilityRole::ROLE_BUTTON : AccessibilityServerEnums::AccessibilityRole::ROLE_IMAGE);
 			as->update_set_name(ae, accessibility_name);
 			if (!accessibility_description.is_empty()) {
 				as->update_set_description(ae, accessibility_description);
 			}
-			as->update_set_transform(ae, Transform2D());
-			as->update_set_bounds(ae, rect);
 
-			// A registered ACTION_FOCUS is what makes the node a TalkBack swipe stop (there is
-			// no FLAG_FOCUSABLE). Mirrors Control's focusable gating.
+			// Bounds: project the visual's local AABB into the viewport and report it the
+			// same way Control does -- an identity element transform plus a bounds rect in
+			// the viewport's logical coordinate space. `Camera3D::unproject_position()`
+			// already returns logical (visible-rect) coordinates, the same space Control's
+			// composed bounds land in, so the root Window's content-scale transform is
+			// applied exactly once (no double-transform).
+			// See docs/android-accessibility/10-architecture-3d-a11y.md.
+			Viewport *vp = get_viewport();
+			Camera3D *cam = vp ? vp->get_camera_3d() : nullptr;
+			if (cam) {
+				const Transform3D gt = get_global_transform();
+				const AABB aabb = vi->get_aabb();
+				Vector2 r_min;
+				Vector2 r_max;
+				int visible_corners = 0;
+				for (int i = 0; i < 8; i++) {
+					const Vector3 world = gt.xform(aabb.get_endpoint(i));
+					if (cam->is_position_behind(world)) {
+						continue;
+					}
+					const Vector2 sp = cam->unproject_position(world);
+					if (visible_corners == 0) {
+						r_min = sp;
+						r_max = sp;
+					} else {
+						r_min.x = MIN(r_min.x, sp.x);
+						r_min.y = MIN(r_min.y, sp.y);
+						r_max.x = MAX(r_max.x, sp.x);
+						r_max.y = MAX(r_max.y, sp.y);
+					}
+					visible_corners++;
+				}
+				// Need at least two on-screen corners for a meaningful rectangle.
+				if (visible_corners >= 2) {
+					Rect2 rect(r_min, r_max - r_min);
+					// Guarantee a minimum focusable footprint (~48dp touch target).
+					const real_t min_size = 48.0;
+					if (rect.size.x < min_size) {
+						rect.position.x -= (min_size - rect.size.x) * 0.5;
+						rect.size.x = min_size;
+					}
+					if (rect.size.y < min_size) {
+						rect.position.y -= (min_size - rect.size.y) * 0.5;
+						rect.size.y = min_size;
+					}
+					as->update_set_transform(ae, Transform2D());
+					as->update_set_bounds(ae, rect);
+				}
+			}
+
+			// A registered ACTION_FOCUS is what makes the node a TalkBack swipe stop (there
+			// is no FLAG_FOCUSABLE). Mirrors Control's focusable gating.
 			as->update_add_action(ae, AccessibilityServerEnums::AccessibilityAction::ACTION_FOCUS, callable_mp(this, &Node3D::_accessibility_action_focus));
 			as->update_add_action(ae, AccessibilityServerEnums::AccessibilityAction::ACTION_BLUR, callable_mp(this, &Node3D::_accessibility_action_blur));
 			if (accessibility_clickable) {
