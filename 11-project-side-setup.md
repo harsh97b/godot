@@ -41,6 +41,10 @@ Set these on the **geometry leaf** (the node that actually has the shape) — se
   silent — so put the name on the visual leaf, not a logical parent.
 - The focus rectangle is **projected from the node's 3D AABB to the screen**, and needs an **active `Camera3D`** in
   the viewport. No camera → no bounds (the node just won't get a box that frame; it won't crash).
+- **Touch targeting on overlapping elements (devices inside rooms): the LATER sibling in the scene tree wins
+  explore-by-touch** (AccessKit hit-tests children in reverse order, like paint order). So **put the planes/rooms
+  group BEFORE the devices group** — devices then win touches over the plane that contains them, and the swipe order
+  is rooms → devices.
 - A node whose `is_visible_in_tree()` is `false` is **removed from TalkBack** (so hiding a parent hides the subtree).
 - **Swipe order = scene-tree child order** (depth-first). Arrange the tree in the order you want things read.
 
@@ -114,6 +118,10 @@ Main
 ```
 Result: **top controls → rooms → devices → bottom controls.** Keep `Rooms` before `Devices` so rooms are announced
 first. (A `CanvasLayer`'s *tree position* sets its a11y order even though it still renders on top.)
+
+> **This order is also required for touch:** explore-by-touch gives overlapping elements to the **later** sibling
+> (reverse/paint order). Rooms-before-devices makes the devices win touches over the plane that contains them; with
+> devices first, touching a device would announce the room plane instead.
 
 > If you ever can't physically reorder the tree, fall back to `accessibility_flow_to_nodes` to chain the sequence, or
 > a root node overriding `accessibility_override_tree_hierarchy()` (the `TabContainer` pattern).
