@@ -440,6 +440,9 @@ void ScrollContainer::_reposition_children() {
 
 	update_maximum_size();
 	queue_redraw();
+	// Refresh the reported scroll offsets/ranges (repositioned children queue their own
+	// updates via set_rect, but the container's own rect doesn't change when it scrolls).
+	queue_accessibility_update();
 }
 
 void ScrollContainer::_accessibility_action_scroll_set(const Variant &p_data) {
@@ -449,6 +452,13 @@ void ScrollContainer::_accessibility_action_scroll_set(const Variant &p_data) {
 }
 
 void ScrollContainer::_accessibility_action_scroll_up(const Variant &p_data) {
+	// Platform scroll-backward requests are axis-agnostic and may arrive as a vertical
+	// scroll on a horizontal-only container (e.g. a screen reader auto-scrolling a
+	// horizontal list) -- redirect to the axis that can actually move.
+	if ((vertical_scroll_mode == SCROLL_MODE_DISABLED || v_scroll->get_max() - v_scroll->get_page() <= v_scroll->get_min()) && horizontal_scroll_mode != SCROLL_MODE_DISABLED) {
+		_accessibility_action_scroll_left(p_data);
+		return;
+	}
 	if ((AccessibilityServerEnums::AccessibilityScrollUnit)p_data == AccessibilityServerEnums::SCROLL_UNIT_ITEM) {
 		v_scroll->set_value(v_scroll->get_value() - v_scroll->get_page() / ScrollBar::PAGE_DIVISOR);
 	} else {
@@ -457,6 +467,11 @@ void ScrollContainer::_accessibility_action_scroll_up(const Variant &p_data) {
 }
 
 void ScrollContainer::_accessibility_action_scroll_down(const Variant &p_data) {
+	// See _accessibility_action_scroll_up.
+	if ((vertical_scroll_mode == SCROLL_MODE_DISABLED || v_scroll->get_max() - v_scroll->get_page() <= v_scroll->get_min()) && horizontal_scroll_mode != SCROLL_MODE_DISABLED) {
+		_accessibility_action_scroll_right(p_data);
+		return;
+	}
 	if ((AccessibilityServerEnums::AccessibilityScrollUnit)p_data == AccessibilityServerEnums::SCROLL_UNIT_ITEM) {
 		v_scroll->set_value(v_scroll->get_value() + v_scroll->get_page() / ScrollBar::PAGE_DIVISOR);
 	} else {
@@ -490,6 +505,19 @@ void ScrollContainer::_notification(int p_what) {
 				AccessibilityServer::get_singleton()->update_set_role(ae, AccessibilityServerEnums::AccessibilityRole::ROLE_REGION);
 			} else {
 				AccessibilityServer::get_singleton()->update_set_role(ae, AccessibilityServerEnums::AccessibilityRole::ROLE_SCROLL_VIEW);
+			}
+
+			// Report scroll offsets and ranges, so platform adapters can expose
+			// scrollability (e.g. Android TalkBack derives its scroll-forward/backward
+			// actions and scrolled events from these when auto-scrolling past the last
+			// visible item). The largest reachable offset is max - page.
+			if (horizontal_scroll_mode != SCROLL_MODE_DISABLED) {
+				AccessibilityServer::get_singleton()->update_set_scroll_x_range(ae, h_scroll->get_min(), MAX(h_scroll->get_min(), h_scroll->get_max() - h_scroll->get_page()));
+				AccessibilityServer::get_singleton()->update_set_scroll_x(ae, h_scroll->get_value());
+			}
+			if (vertical_scroll_mode != SCROLL_MODE_DISABLED) {
+				AccessibilityServer::get_singleton()->update_set_scroll_y_range(ae, v_scroll->get_min(), MAX(v_scroll->get_min(), v_scroll->get_max() - v_scroll->get_page()));
+				AccessibilityServer::get_singleton()->update_set_scroll_y(ae, v_scroll->get_value());
 			}
 
 			AccessibilityServer::get_singleton()->update_add_action(ae, AccessibilityServerEnums::AccessibilityAction::ACTION_SCROLL_DOWN, callable_mp(this, &ScrollContainer::_accessibility_action_scroll_down));
