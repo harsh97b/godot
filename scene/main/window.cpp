@@ -3523,6 +3523,7 @@ void Window::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_accessibility_name"), &Window::get_accessibility_name);
 	ClassDB::bind_method(D_METHOD("set_accessibility_description", "description"), &Window::set_accessibility_description);
 	ClassDB::bind_method(D_METHOD("get_accessibility_description"), &Window::get_accessibility_description);
+	ClassDB::bind_method(D_METHOD("accessibility_announcement", "announcement"), &Window::accessibility_announcement);
 
 	ClassDB::bind_static_method("Window", D_METHOD("get_focused_window"), &Window::get_focused_window);
 
