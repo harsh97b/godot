@@ -14,9 +14,11 @@ in [`07-usecase-home-map.md`](07-usecase-home-map.md).
 ## 0. One-time project setup
 
 **Project → Project Settings** (enable *Advanced Settings* to see them):
-- `accessibility/general/accessibility_support` = **Always Active** (`2`)
-- `accessibility/general/accessibility_driver` = **`accesskit`**
-- (optional) `accessibility/general/updates_per_second` — the a11y flush rate (default ~10 Hz). Leave as-is.
+- `accessibility/general/accessibility_support` = **`1` (Always Active)** for testing, or leave **`0` (Auto)** — Auto
+  activates whenever a screen reader (TalkBack) is running, which is fine for shipping. **Do NOT set `2` — that is
+  _Disabled_** and turns accessibility off.
+- `accessibility/general/accessibility_driver` = **`accesskit`** (already the default).
+- (optional) `accessibility/general/updates_per_second` — the a11y flush rate (default `60`). Leave as-is.
 
 That's it for setup. Everything else is per-node.
 
@@ -156,17 +158,35 @@ func show_home_screen() -> void:
 The engine re-runs each descendant's handler on the visibility change, so the 3D nodes go silent immediately and
 restore on show — no off-screen leakage.
 
-**If the edit screen keeps the map rendered but should not expose it to TalkBack**, don't use `visible=false` (that
-hides it visually). Instead clear the names while in edit mode and restore them on home — opt-out is just an empty
-name:
+**If the page transition keeps the map rendered** (the real flow here: entering Edit Map only toggles UI
+visibility and shifts the map up — the map is never hidden), `visible=false` is not an option. Use the fact that
+3D accessibility is **opt-in by name**: an empty `accessibility_name` = silent, a non-empty one = focusable. Toggle
+names on the transition.
+
+**Example — furniture (.glb) that must be silent on the MAIN page but accessible on the EDIT page:**
 ```gdscript
-func _set_map_accessible(on: bool) -> void:
-    for n in $Map.find_children("*", "VisualInstance3D", true, false):
-        if on:
-            n.accessibility_name = _saved_names.get(n, "")   # restore (cache names when you first set them)
-        else:
-            n.accessibility_name = ""                        # silent, but still rendered
+# Each furniture piece is an instanced .glb scene. Name ONE representative geometry
+# leaf per piece (its main MeshInstance3D); all other meshes stay unnamed -> silent.
+func _furniture_mesh(piece: Node3D) -> MeshInstance3D:
+    return piece.find_children("*", "MeshInstance3D", true, false)[0]  # or a known path
+
+func enter_edit_page() -> void:
+    _toggle_edit_ui(true)            # your existing UI toggle + map shift
+    for piece in furniture_root.get_children():
+        _furniture_mesh(piece).accessibility_name = piece.furniture_display_name  # now focusable
+    _on_camera_settled()             # re-project bounds after the map shifted up (see §3.5)
+
+func leave_edit_page() -> void:
+    _toggle_edit_ui(false)
+    for piece in furniture_root.get_children():
+        _furniture_mesh(piece).accessibility_name = ""   # silent again on the main page
+    _on_camera_settled()
 ```
+- The name setters queue the accessibility updates themselves; the `_on_camera_settled()` call re-projects
+  everything else (rooms/devices) for the new map position — entering/leaving edit moves the map, so always run it.
+- The same pattern works in reverse for anything that should be accessible on the main page only.
+- If a furniture piece should also be **activatable** on the edit page (e.g. select it for editing), additionally
+  set `accessibility_clickable = true` and connect `accessibility_action_click` — and clear the flag on leave.
 
 ---
 
