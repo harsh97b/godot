@@ -117,7 +117,7 @@ class GodotGLRenderView extends GLSurfaceView implements GodotRenderView {
 		return new AccessibilityNodeProvider() {
 			@Override
 			public AccessibilityNodeInfo createAccessibilityNodeInfo(int virtualViewId) {
-				return GodotLib.acCreateAccessibilityNodeInfo(mWindowID, getView(), virtualViewId);
+				return GodotLib.acFixCollectionInfo(GodotLib.acCreateAccessibilityNodeInfo(mWindowID, getView(), virtualViewId));
 			}
 
 			@Override

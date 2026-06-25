@@ -124,6 +124,34 @@ public class GodotLib {
 	public static native boolean acOnHoverEvent(long windowID, View host, int action, float x, float y);
 
 	/**
+	 * Work around a TalkBack crash (NullPointerException in CollectionInfo.getItemCount()).
+	 * A node AccessKit maps to a collection class (ListView/GridView/...) can arrive with a
+	 * null AccessibilityNodeInfo.CollectionInfo. That poisons TalkBack's persistent collection
+	 * state and then crashes the whole app on the next accessibility focus of ANY view (seen on
+	 * some TalkBack versions). Attach a valid CollectionInfo here so it is never null.
+	 */
+	public static AccessibilityNodeInfo acFixCollectionInfo(AccessibilityNodeInfo info) {
+		if (info == null) {
+			return null;
+		}
+		try {
+			if (info.getCollectionInfo() == null) {
+				CharSequence classNameRaw = info.getClassName();
+				if (classNameRaw != null) {
+					String className = classNameRaw.toString();
+					if (className.endsWith("ListView") || className.endsWith("GridView") || className.endsWith("ExpandableListView") || className.endsWith("RecyclerView") || className.endsWith("Spinner")) {
+						int rows = Math.max(0, info.getChildCount());
+						info.setCollectionInfo(AccessibilityNodeInfo.CollectionInfo.obtain(rows, 1, false));
+					}
+				}
+			}
+		} catch (Throwable t) {
+			// The workaround itself must never crash the app.
+		}
+		return info;
+	}
+
+	/**
 	 * Forward touch events.
 	 */
 	public static native void dispatchTouchEvent(int event, int pointer, int pointerCount, float[] positions, boolean doubleTap);
