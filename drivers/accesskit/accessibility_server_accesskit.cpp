@@ -809,28 +809,6 @@ _FORCE_INLINE_ void AccessibilityServerAccessKit::_ensure_node(const RID &p_id, 
 		if (!full_name.is_empty()) {
 			accesskit_node_set_label(p_ae->node, full_name.utf8().ptr());
 		}
-
-#ifdef ANDROID_ENABLED
-		// Collection roles map to Android collection class names (ListView/GridView/...), for
-		// which TalkBack reads AccessibilityNodeInfo.CollectionInfo. When a collection node
-		// carries no collection metadata that CollectionInfo is null, and TalkBack crashes the
-		// whole app with a NullPointerException in CollectionInfo.getItemCount(). Guarantee a
-		// non-null CollectionInfo here; real row/column counts (Tree, RichTextLabel tables)
-		// override these defaults later in the same update.
-		switch (p_ae->role) {
-			case ACCESSKIT_ROLE_LIST:
-			case ACCESSKIT_ROLE_LIST_BOX:
-			case ACCESSKIT_ROLE_GRID:
-			case ACCESSKIT_ROLE_TABLE:
-			case ACCESSKIT_ROLE_TREE:
-			case ACCESSKIT_ROLE_TREE_GRID: {
-				accesskit_node_set_row_count(p_ae->node, 0);
-				accesskit_node_set_column_count(p_ae->node, 0);
-			} break;
-			default:
-				break;
-		}
-#endif
 	}
 }
 
