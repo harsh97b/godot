@@ -287,7 +287,12 @@ void SceneTree::_process_accessibility_changes(DisplayServerEnums::WindowID p_wi
 		RID new_focus_element;
 		Control *n_focus = w_this->gui_get_focus_owner();
 		if (n_focus && !n_focus->is_part_of_edited_scene()) {
+			// A Control holds key focus -> it wins; drop any manual grab_accessibility_focus() request.
+			w_this->clear_accessibility_requested_focus();
 			new_focus_element = n_focus->get_focused_accessibility_element();
+		} else if (w_this->get_accessibility_requested_focus().is_valid()) {
+			// A node (e.g. a Node3D) requested screen-reader focus via grab_accessibility_focus().
+			new_focus_element = w_this->get_accessibility_requested_focus();
 		} else {
 			new_focus_element = w_this->get_focused_accessibility_element();
 		}

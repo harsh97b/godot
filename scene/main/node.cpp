@@ -2131,6 +2131,19 @@ Window *Node::get_window() const {
 	return nullptr;
 }
 
+void Node::grab_accessibility_focus() {
+	ERR_MAIN_THREAD_GUARD;
+	ERR_FAIL_COND(!is_inside_tree());
+	// Move the screen reader's focus to this node's accessibility element (works for any node,
+	// e.g. a Node3D device icon, not just Controls). The node must be an exposed, on-screen
+	// element for the reader to actually land on it.
+	Window *w = get_window();
+	if (w) {
+		w->set_accessibility_requested_focus(get_accessibility_element());
+	}
+	queue_accessibility_update();
+}
+
 Window *Node::get_non_popup_window() const {
 	Window *w = get_window();
 	while (w && w->is_popup()) {
@@ -3833,6 +3846,7 @@ void Node::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("queue_accessibility_update"), &Node::queue_accessibility_update);
 	ClassDB::bind_method(D_METHOD("get_accessibility_element"), &Node::get_accessibility_element);
+	ClassDB::bind_method(D_METHOD("grab_accessibility_focus"), &Node::grab_accessibility_focus);
 
 	ClassDB::bind_method(D_METHOD("set_display_folded", "fold"), &Node::set_display_folded);
 	ClassDB::bind_method(D_METHOD("is_displayed_folded"), &Node::is_displayed_folded);

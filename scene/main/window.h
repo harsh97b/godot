@@ -160,6 +160,7 @@ private:
 
 	RID accessibility_title_element;
 	RID accessibility_announcement_element;
+	RID accessibility_requested_focus;
 	String announcement;
 	String accessibility_name;
 	String accessibility_description;
@@ -306,6 +307,10 @@ public:
 
 	RID get_accessibility_element() const override;
 	virtual RID get_focused_accessibility_element() const override;
+
+	void set_accessibility_requested_focus(const RID &p_id);
+	RID get_accessibility_requested_focus() const;
+	void clear_accessibility_requested_focus();
 
 	void set_title(const String &p_title);
 	String get_title() const;

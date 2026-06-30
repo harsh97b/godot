@@ -721,6 +721,7 @@ public:
 	BitField<ProcessThreadMessages> get_process_thread_messages() const;
 
 	void queue_accessibility_update();
+	void grab_accessibility_focus();
 
 	virtual RID get_accessibility_element() const;
 	virtual RID get_focused_accessibility_element() const;
