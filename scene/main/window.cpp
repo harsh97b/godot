@@ -1518,6 +1518,24 @@ RID Window::get_focused_accessibility_element() const {
 	return Node::get_focused_accessibility_element();
 }
 
+void Window::set_accessibility_requested_focus(const RID &p_id) {
+	ERR_MAIN_THREAD_GUARD;
+	accessibility_requested_focus = p_id;
+	if (p_id.is_valid()) {
+		// Drop any Control key focus so this request wins in the accessibility flush. It is
+		// auto-cleared once a Control takes key focus again (e.g. TalkBack swipes onto one).
+		gui_release_focus();
+	}
+}
+
+RID Window::get_accessibility_requested_focus() const {
+	return accessibility_requested_focus;
+}
+
+void Window::clear_accessibility_requested_focus() {
+	accessibility_requested_focus = RID();
+}
+
 String Window::_get_accessibility_name() const {
 	if (accessibility_name.is_empty()) {
 		return displayed_title;
@@ -1792,6 +1810,7 @@ void Window::_notification(int p_what) {
 
 			accessibility_title_element = RID();
 			accessibility_announcement_element = RID();
+			accessibility_requested_focus = RID();
 
 			if (transient) {
 				_clear_transient();
